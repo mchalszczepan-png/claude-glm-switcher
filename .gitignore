@@ -1,0 +1,24 @@
+# Never commit real settings files — these contain API keys
+settings.json
+settings.bak.json
+*.settings.json
+
+# Never commit user config files — these contain API keys
+CONFIG.sh
+CONFIG.ps1
+
+# Never commit user-customized LiteLLM config — contains real API keys
+litellm-config.yaml
+
+# Credentials
+*.credentials*
+*.key
+*.secret
+
+# OS clutter
+.DS_Store
+Thumbs.db
+
+# Editor clutter
+.vscode/
+.idea/
