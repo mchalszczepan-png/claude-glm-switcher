@@ -1,19 +1,12 @@
-# Never commit real settings files — these contain API keys
+# Installed config copies (contain real API keys after setup)
+~/.claude-switcher/CONFIG.sh
+~/.claude-switcher/CONFIG.ps1
+~/.litellm/config.yaml
+
+# Generated settings templates (created by setup script, may contain real keys)
+*.settings.json
 settings.json
 settings.bak.json
-*.settings.json
-
-# Never commit user config files — these contain API keys
-CONFIG.sh
-CONFIG.ps1
-
-# Never commit user-customized LiteLLM config — contains real API keys
-litellm-config.yaml
-
-# Credentials
-*.credentials*
-*.key
-*.secret
 
 # OS clutter
 .DS_Store
