@@ -13,7 +13,7 @@ $SettingsFiles = @(
     "$env:USERPROFILE\.claude\settings.json",              # Claude Code CLI
     "$env:APPDATA\Antigravity\User\settings.json"          # Antigravity IDE
     # "$env:APPDATA\Cursor\User\settings.json",            # Cursor (uncomment if used)
-    # "$env:APPDATA\Code\User\settings.json",              # VS Code (uncomment if used)
+    "$env:APPDATA\Code\User\settings.json",                # VS Code
     # "$env:APPDATA\Windsurf\User\settings.json"           # Windsurf (uncomment if used)
 )
 
@@ -22,7 +22,7 @@ $TemplateDirs = @(
     "$env:USERPROFILE\.claude",
     "$env:APPDATA\Antigravity\User"
     # "$env:APPDATA\Cursor\User",
-    # "$env:APPDATA\Code\User",
+    "$env:APPDATA\Code\User",
     # "$env:APPDATA\Windsurf\User"
 )
 

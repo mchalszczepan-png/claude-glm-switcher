@@ -14,7 +14,7 @@ SETTINGS_FILES=(
   "$HOME/.claude/settings.json"                        # Claude Code CLI
   "$HOME/.config/Cursor/User/settings.json"            # Cursor IDE
   "$HOME/.config/Antigravity/User/settings.json"       # Antigravity IDE
-  # "$HOME/.config/Code/User/settings.json"            # VS Code (uncomment if used)
+  "$HOME/.config/Code/User/settings.json"              # VS Code
   # "$HOME/.config/windsurf/User/settings.json"        # Windsurf (uncomment if used)
   # Add more paths here as needed
 )
@@ -26,7 +26,7 @@ TEMPLATE_DIRS=(
   "$HOME/.claude"
   "$HOME/.config/Cursor/User"
   "$HOME/.config/Antigravity/User"
-  # "$HOME/.config/Code/User"
+  "$HOME/.config/Code/User"
   # "$HOME/.config/windsurf/User"
 )
 
