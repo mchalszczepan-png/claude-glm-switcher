@@ -409,3 +409,4 @@ if ($hasLitellmMode) {
     Write-Host "     Then start LiteLLM: litellm --config $litellmConfigPath" -ForegroundColor White
 }
 Write-Host ""
+\r
