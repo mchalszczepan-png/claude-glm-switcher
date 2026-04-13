@@ -97,6 +97,12 @@ env = {
     "ANTHROPIC_BASE_URL": base_url,
     "API_TIMEOUT_MS": "3000000",
 }
+
+# OpenRouter: must explicitly set ANTHROPIC_API_KEY to empty string
+# to prevent Claude Code from falling back to a cached Anthropic key.
+if service == "openrouter":
+    env["ANTHROPIC_API_KEY"] = ""
+
 if opus:   env["ANTHROPIC_DEFAULT_OPUS_MODEL"]   = opus
 if sonnet: env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = sonnet
 if haiku:  env["ANTHROPIC_DEFAULT_HAIKU_MODEL"]  = haiku
@@ -154,7 +160,31 @@ for SERVICE in "${SERVICES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# 5. Add source line to ~/.bashrc if not already present
+# 5. LiteLLM config check (needed for litellm and openai modes)
+# ---------------------------------------------------------------------------
+LITELLM_CONFIG="$HOME/.litellm/config.yaml"
+if echo "${SERVICES[@]}" | grep -qw "openai\|litellm"; then
+  if [ ! -f "$LITELLM_CONFIG" ]; then
+    echo ""
+    echo "LiteLLM config not found at $LITELLM_CONFIG"
+    read -rp "Copy the example template there now? [y/N] " COPY_LITELLM
+    if [ "$COPY_LITELLM" = "y" ] || [ "$COPY_LITELLM" = "Y" ]; then
+      mkdir -p "$(dirname "$LITELLM_CONFIG")"
+      cp "$REPO_DIR/templates/litellm-config.yaml" "$LITELLM_CONFIG"
+      echo "  [OK]   Copied template to $LITELLM_CONFIG"
+      echo "  [NOTE] Fill in your OpenAI key and LiteLLM master key in that file."
+    else
+      echo "  [SKIP] You'll need to create $LITELLM_CONFIG manually."
+      echo "         Copy templates/litellm-config.yaml and fill in your keys."
+    fi
+  else
+    echo ""
+    echo "[OK]   LiteLLM config found at $LITELLM_CONFIG"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Add source line to ~/.bashrc if not already present
 # ---------------------------------------------------------------------------
 echo ""
 BASHRC_LINE="source \"$REPO_DIR/linux/bashrc_additions.sh\""
@@ -172,7 +202,7 @@ sed -i "s|SWITCHER_CONFIG=.*|SWITCHER_CONFIG=\"$SWITCHER_DIR/CONFIG.sh\"|" \
   "$REPO_DIR/linux/bashrc_additions.sh" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# 6. Done
+# 7. Done
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Setup Complete ==="
@@ -183,6 +213,7 @@ echo ""
 echo "Then switch modes with:"
 echo "  glm-mode          # GLM via Z.ai"
 echo "  openrouter-mode   # OpenRouter"
+echo "  openai-mode       # OpenAI / ChatGPT (via LiteLLM)"
 echo "  requesty-mode     # Requesty"
 echo "  litellm-mode      # LiteLLM local proxy"
 echo "  claude-mode       # Back to Anthropic"

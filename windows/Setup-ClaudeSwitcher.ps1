@@ -7,30 +7,23 @@
 #   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 #   .\Setup-ClaudeSwitcher.ps1
 #
-# After running, three icons appear on your Desktop:
-#   - Switch to GLM Mode.bat
-#   - Switch to Claude Mode.bat
-#   - Update Z.ai API Key.bat
+# After running, desktop shortcuts appear for every configured service.
 #
-# Paths configured for:
-#   Antigravity IDE:  %APPDATA%\Antigravity\User\settings.json
-#   Claude Code CLI:  %USERPROFILE%\.claude\settings.json
+# Paths configured in windows/CONFIG.ps1.
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# 0. Paths
+# 0. Load config and set up paths
 # ---------------------------------------------------------------------------
-$antigravitySettings = "$env:APPDATA\Antigravity\User\settings.json"
-$claudeCliSettings   = "$env:USERPROFILE\.claude\settings.json"
-$antigravityDir      = Split-Path $antigravitySettings
-$claudeCliDir        = Split-Path $claudeCliSettings
-$desktopPath         = [System.Environment]::GetFolderPath("Desktop")
-$switcherDir         = "$env:USERPROFILE\.claude-switcher"
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path
+$configPath = Join-Path $scriptDir "CONFIG.ps1"
+# shellcheck source=/dev/null
+. $configPath
 
-$agGlmTemplate       = "$antigravityDir\glm.settings.json"
-$agClaudeTemplate    = "$antigravityDir\claude.settings.json"
-$cliGlmTemplate      = "$claudeCliDir\glm.settings.json"
-$cliClaudeTemplate   = "$claudeCliDir\claude.settings.json"
+$desktopPath = [System.Environment]::GetFolderPath("Desktop")
+$switcherDir = "$env:USERPROFILE\.claude-switcher"
+
+New-Item -ItemType Directory -Force -Path $switcherDir | Out-Null
 
 # ---------------------------------------------------------------------------
 # 1. Sanity checks
@@ -39,27 +32,19 @@ Write-Host ""
 Write-Host "=== claude-glm-switcher Setup ===" -ForegroundColor Cyan
 Write-Host ""
 
-if (-not (Test-Path $antigravitySettings)) {
-    Write-Warning "Antigravity settings.json not found at: $antigravitySettings"
-    Write-Warning "Make sure Antigravity IDE has been launched at least once."
-    $confirm = Read-Host "Continue anyway and create directories? (y/n)"
-    if ($confirm -ne 'y') { exit 1 }
+foreach ($settingsPath in $SettingsFiles) {
+    $dir = Split-Path $settingsPath
+    if (-not (Test-Path $dir)) {
+        Write-Warning "Config dir not found: $dir"
+        $confirm = Read-Host "Create it? (y/n)"
+        if ($confirm -ne 'y') { exit 1 }
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
 }
-
-if (-not (Test-Path $claudeCliDir)) {
-    Write-Warning "Claude CLI config dir not found at: $claudeCliDir"
-    Write-Warning "Make sure Claude Code CLI has been installed."
-    $confirm = Read-Host "Continue anyway and create directories? (y/n)"
-    if ($confirm -ne 'y') { exit 1 }
-}
-
-New-Item -ItemType Directory -Force -Path $antigravityDir | Out-Null
-New-Item -ItemType Directory -Force -Path $claudeCliDir   | Out-Null
-New-Item -ItemType Directory -Force -Path $switcherDir    | Out-Null
 
 # ---------------------------------------------------------------------------
 # 2. Snapshot current settings as claude.settings.json
-#    Skipped if template already exists — never overwrite a known-good backup.
+#    Never overwrite — the claude template is the known-good backup.
 # ---------------------------------------------------------------------------
 function Snapshot-AsClaudeTemplate {
     param($sourcePath, $destPath, $label, $fallback)
@@ -75,19 +60,31 @@ function Snapshot-AsClaudeTemplate {
 }
 
 Write-Host "Creating Claude (default) template files..." -ForegroundColor Cyan
-Snapshot-AsClaudeTemplate $antigravitySettings $agClaudeTemplate  "Antigravity" '{ "effortLevel": "medium" }'
-Snapshot-AsClaudeTemplate $claudeCliSettings   $cliClaudeTemplate "Claude CLI"  '{ "model": "sonnet[1m]", "effortLevel": "medium" }'
+
+$i = 0
+foreach ($settingsPath in $SettingsFiles) {
+    $templateDir = $TemplateDirs[$i]
+    $claudeTemplate = Join-Path $templateDir "claude.settings.json"
+    New-Item -ItemType Directory -Force -Path $templateDir | Out-Null
+    Snapshot-AsClaudeTemplate $settingsPath $claudeTemplate "App$($i+1)" '{ "effortLevel": "medium" }'
+    $i++
+}
 
 # ---------------------------------------------------------------------------
-# 3. Create GLM template files
-#    Merges GLM env block into the Claude template — MCPs etc. are preserved.
-#    Skipped if GLM template already exists.
+# 3. Create service template files
+#    Merges env block into the Claude template so MCPs etc. are preserved.
 # ---------------------------------------------------------------------------
-function Create-GlmTemplate {
-    param($claudeTemplatePath, $destPath, $label, $isIde)
+function Create-ServiceTemplate {
+    param(
+        $claudeTemplatePath,
+        $destPath,
+        $label,
+        $isIde,
+        $svc
+    )
 
     if (Test-Path $destPath) {
-        Write-Host "  [SKIP] $label GLM template already exists." -ForegroundColor Yellow
+        Write-Host "  [SKIP] $label $($svc.Name) template already exists." -ForegroundColor Yellow
         return
     }
 
@@ -97,24 +94,40 @@ function Create-GlmTemplate {
         $base = [PSCustomObject]@{}
     }
 
-    $glmEnv = [PSCustomObject]@{
-        ANTHROPIC_AUTH_TOKEN           = "YOUR_ZAI_API_KEY_HERE"
-        ANTHROPIC_BASE_URL             = "https://api.z.ai/api/anthropic"
-        API_TIMEOUT_MS                 = "3000000"
-        ANTHROPIC_DEFAULT_OPUS_MODEL   = "GLM-5.1"
-        ANTHROPIC_DEFAULT_SONNET_MODEL = "GLM-5"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL  = "GLM-4.7"
+    # Build env block
+    $placeholder = "YOUR_$($svc.Name.ToUpper())_API_KEY_HERE"
+    $keyField = $svc.KeyField
+
+    $envHash = [ordered]@{}
+    if ($keyField) {
+        $envHash[$keyField] = $placeholder
+    }
+    $envHash["ANTHROPIC_BASE_URL"] = $svc.BaseURL
+    $envHash["API_TIMEOUT_MS"] = "3000000"
+    if ($svc.Opus)   { $envHash["ANTHROPIC_DEFAULT_OPUS_MODEL"]   = $svc.Opus }
+    if ($svc.Sonnet) { $envHash["ANTHROPIC_DEFAULT_SONNET_MODEL"] = $svc.Sonnet }
+    if ($svc.Haiku)  { $envHash["ANTHROPIC_DEFAULT_HAIKU_MODEL"]  = $svc.Haiku }
+
+    # OpenRouter: set ANTHROPIC_API_KEY to empty string to prevent fallback
+    if ($svc.Name -eq "openrouter") {
+        $envHash["ANTHROPIC_API_KEY"] = ""
     }
 
+    $envObj = [PSCustomObject]$envHash
+
+    # Set env block
+    if ($base.PSObject.Properties.Name -contains "env") {
+        $base.env = $envObj
+    } else {
+        $base | Add-Member -NotePropertyName "env" -NotePropertyValue $envObj
+    }
+
+    # For IDE settings files, also set claudeCode.* keys
     if ($isIde) {
-        $envArray = @(
-            @{ name = "ANTHROPIC_AUTH_TOKEN";           value = "YOUR_ZAI_API_KEY_HERE" },
-            @{ name = "ANTHROPIC_BASE_URL";             value = "https://api.z.ai/api/anthropic" },
-            @{ name = "API_TIMEOUT_MS";                 value = "3000000" },
-            @{ name = "ANTHROPIC_DEFAULT_OPUS_MODEL";   value = "GLM-5.1" },
-            @{ name = "ANTHROPIC_DEFAULT_SONNET_MODEL"; value = "GLM-5" },
-            @{ name = "ANTHROPIC_DEFAULT_HAIKU_MODEL";  value = "GLM-4.7" }
-        )
+        $envArray = @()
+        foreach ($key in $envHash.Keys) {
+            $envArray += @{ name = $key; value = "$($envHash[$key])" }
+        }
 
         if ($base.PSObject.Properties.Name -contains "claudeCode.disableLoginPrompt") {
             $base."claudeCode.disableLoginPrompt" = $true
@@ -129,81 +142,199 @@ function Create-GlmTemplate {
         }
     }
 
-    if ($base.PSObject.Properties.Name -contains "env") {
-        $base.env = $glmEnv
+    $base | ConvertTo-Json -Depth 10 | Set-Content $destPath
+    Write-Host "  [OK]   $label $($svc.Name) template created." -ForegroundColor Green
+}
+
+foreach ($svc in $Services) {
+    # Skip claude — it's the snapshot, no env block
+    if ($svc.Name -eq "claude") { continue }
+
+    Write-Host ""
+    Write-Host "Creating $($svc.Name) templates..." -ForegroundColor Cyan
+
+    $i = 0
+    foreach ($settingsPath in $SettingsFiles) {
+        $templateDir = $TemplateDirs[$i]
+        $claudeTemplate = Join-Path $templateDir "claude.settings.json"
+        $svcTemplate = Join-Path $templateDir "$($svc.Name).settings.json"
+        $isIde = ($i -gt 0)  # First entry is Claude CLI, rest are IDEs
+
+        Create-ServiceTemplate $claudeTemplate $svcTemplate "App$($i+1)" $isIde $svc
+        $i++
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 4. LiteLLM config check (needed for litellm and openai modes)
+# ---------------------------------------------------------------------------
+$litellmConfigDir = "$env:USERPROFILE\.litellm"
+$litellmConfigPath = Join-Path $litellmConfigDir "config.yaml"
+$hasLitellmMode = $Services | Where-Object { $_.Name -in @("openai", "litellm") }
+
+if ($hasLitellmMode) {
+    if (-not (Test-Path $litellmConfigPath)) {
+        Write-Host ""
+        Write-Host "LiteLLM config not found at: $litellmConfigPath" -ForegroundColor Yellow
+        $copyLitellm = Read-Host "Copy the example template there now? (y/n)"
+        if ($copyLitellm -eq 'y') {
+            New-Item -ItemType Directory -Force -Path $litellmConfigDir | Out-Null
+            $templatePath = Join-Path $scriptDir "..\templates\litellm-config.yaml"
+            Copy-Item $templatePath $litellmConfigPath -Force
+            Write-Host "  [OK]   Copied template to $litellmConfigPath" -ForegroundColor Green
+            Write-Host "  [NOTE] Fill in your OpenAI key and LiteLLM master key in that file." -ForegroundColor Yellow
+        } else {
+            Write-Host "  [SKIP] You'll need to create $litellmConfigPath manually." -ForegroundColor Yellow
+        }
     } else {
-        $base | Add-Member -NotePropertyName "env" -NotePropertyValue $glmEnv
+        Write-Host ""
+        Write-Host "[OK]   LiteLLM config found at $litellmConfigPath" -ForegroundColor Green
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 5. Write switcher scripts into ~/.claude-switcher
+# ---------------------------------------------------------------------------
+
+# Generic switcher — one per service
+foreach ($svc in $Services) {
+    $svcName = $svc.Name
+    $svcLabel = $svc.Label
+
+    # Build copy commands for each settings location
+    $copyLines = @()
+    $errorLines = @()
+    $i = 0
+    foreach ($settingsPath in $SettingsFiles) {
+        $dir = Split-Path $settingsPath
+        $copyLines += "try { Copy-Item `"$dir\$svcName.settings.json`" `"$settingsPath`" -Force } catch { `$errors += `"App$($i+1): `$_`" }"
+        $i++
     }
 
-    $base | ConvertTo-Json -Depth 10 | Set-Content $destPath
-    Write-Host "  [OK]   $label GLM template created." -ForegroundColor Green
+    $modelsMsg = ""
+    if ($svc.Opus)   { $modelsMsg += "`n  Opus   -> $($svc.Opus)" }
+    if ($svc.Sonnet) { $modelsMsg += "`n  Sonnet -> $($svc.Sonnet)" }
+    if ($svc.Haiku)  { $modelsMsg += "`n  Haiku  -> $($svc.Haiku)" }
+
+    $proxyNote = ""
+    if ($svc.IsProxy) {
+        $proxyNote = "`n`nMake sure LiteLLM is running: litellm --config ~/.litellm/config.yaml"
+    }
+
+    $script = @"
+`$errors = @()
+$($copyLines -join "`n")
+Add-Type -AssemblyName PresentationFramework
+if (`$errors.Count -eq 0) {
+    [System.Windows.MessageBox]::Show(
+        "Switched to $svcLabel$modelsMsg$proxyNote",
+        "claude-glm-switcher", "OK", "Information") | Out-Null
+} else {
+    [System.Windows.MessageBox]::Show(
+        "Switched to $svcLabel with errors:`n`n" + (`$errors -join "`n"),
+        "claude-glm-switcher", "OK", "Warning") | Out-Null
+}
+"@
+    $script | Set-Content "$switcherDir\switch-$svcName.ps1"
 }
 
 Write-Host ""
-Write-Host "Creating GLM template files..." -ForegroundColor Cyan
-Create-GlmTemplate $agClaudeTemplate  $agGlmTemplate  "Antigravity" $true
-Create-GlmTemplate $cliClaudeTemplate $cliGlmTemplate "Claude CLI"  $false
+Write-Host "Switcher scripts written to: $switcherDir" -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
-# 4. Write switcher scripts into ~/.claude-switcher
+# 6. API key updater script — handles all services
 # ---------------------------------------------------------------------------
-
-# GLM switcher
-@'
-$errors = @()
-try { Copy-Item "$env:APPDATA\Antigravity\User\glm.settings.json" "$env:APPDATA\Antigravity\User\settings.json" -Force } catch { $errors += "Antigravity: $_" }
-try { Copy-Item "$env:USERPROFILE\.claude\glm.settings.json" "$env:USERPROFILE\.claude\settings.json" -Force } catch { $errors += "Claude CLI: $_" }
-Add-Type -AssemblyName PresentationFramework
-if ($errors.Count -eq 0) {
-    [System.Windows.MessageBox]::Show(
-        "Switched to GLM Mode`n`nModels:`n  Opus   -> GLM-5.1`n  Sonnet -> GLM-5`n  Haiku  -> GLM-4.7`n`nIf you haven't set your Z.ai API key yet, run 'Update Z.ai API Key' from the Desktop.",
-        "claude-glm-switcher", "OK", "Information") | Out-Null
-} else {
-    [System.Windows.MessageBox]::Show(
-        "Switched to GLM Mode with errors:`n`n" + ($errors -join "`n"),
-        "claude-glm-switcher", "OK", "Warning") | Out-Null
-}
-'@ | Set-Content "$switcherDir\switch-glm.ps1"
-
-# Claude switcher
-@'
-$errors = @()
-try { Copy-Item "$env:APPDATA\Antigravity\User\claude.settings.json" "$env:APPDATA\Antigravity\User\settings.json" -Force } catch { $errors += "Antigravity: $_" }
-try { Copy-Item "$env:USERPROFILE\.claude\claude.settings.json" "$env:USERPROFILE\.claude\settings.json" -Force } catch { $errors += "Claude CLI: $_" }
-Add-Type -AssemblyName PresentationFramework
-if ($errors.Count -eq 0) {
-    [System.Windows.MessageBox]::Show(
-        "Switched to Claude Mode`n`nUsing Anthropic models via official API.",
-        "claude-glm-switcher", "OK", "Information") | Out-Null
-} else {
-    [System.Windows.MessageBox]::Show(
-        "Switched to Claude Mode with errors:`n`n" + ($errors -join "`n"),
-        "claude-glm-switcher", "OK", "Warning") | Out-Null
-}
-'@ | Set-Content "$switcherDir\switch-claude.ps1"
-
-# API key updater
-@'
+$keyUpdater = @'
 Add-Type -AssemblyName Microsoft.VisualBasic
 Add-Type -AssemblyName PresentationFramework
 
-$newKey = [Microsoft.VisualBasic.Interaction]::InputBox(
-    "Enter your new Z.ai API key:",
-    "Update Z.ai API Key",
-    ""
-)
+# Load config
+. (Join-Path $PSScriptRoot "..\windows\CONFIG.ps1")
 
-if ([string]::IsNullOrWhiteSpace($newKey)) {
-    [System.Windows.MessageBox]::Show("No key entered. Nothing was changed.", "Update Z.ai API Key", "OK", "Warning") | Out-Null
+# Ask which service
+$svcNames = ($Services | Where-Object { $_.Name -ne "claude" } | ForEach-Object { $_.Name }) -join ", "
+$newKey = $null
+$svcName = [Microsoft.VisualBasic.Interaction]::InputBox(
+    "Which service key to update?`n`nAvailable: $svcNames",
+    "Update API Key",
+    "")
+
+if ([string]::IsNullOrWhiteSpace($svcName)) {
+    [System.Windows.MessageBox]::Show("No service entered. Nothing was changed.", "Update API Key", "OK", "Warning") | Out-Null
     exit
 }
 
-$allFiles = @(
-    "$env:APPDATA\Antigravity\User\glm.settings.json",
-    "$env:APPDATA\Antigravity\User\settings.json",
-    "$env:USERPROFILE\.claude\glm.settings.json",
-    "$env:USERPROFILE\.claude\settings.json"
-)
+# Find the service
+$svc = $Services | Where-Object { $_.Name -eq $svcName }
+if (-not $svc) {
+    [System.Windows.MessageBox]::Show("Unknown service: $svcName`nAvailable: $svcNames", "Update API Key", "OK", "Warning") | Out-Null
+    exit
+}
+
+# Special case: openai — key goes in litellm config
+if ($svcName -eq "openai") {
+    $newKey = [Microsoft.VisualBasic.Interaction]::InputBox(
+        "Enter your new OpenAI API key:",
+        "Update OpenAI Key",
+        "")
+
+    if ([string]::IsNullOrWhiteSpace($newKey)) {
+        [System.Windows.MessageBox]::Show("No key entered. Nothing was changed.", "Update OpenAI Key", "OK", "Warning") | Out-Null
+        exit
+    }
+
+    $litellmConfig = "$env:USERPROFILE\.litellm\config.yaml"
+    if (-not (Test-Path $litellmConfig)) {
+        [System.Windows.MessageBox]::Show(
+            "LiteLLM config not found at: $litellmConfig`nCopy templates/litellm-config.yaml there first.",
+            "Update OpenAI Key", "OK", "Warning") | Out-Null
+        exit
+    }
+
+    $content = Get-Content $litellmConfig -Raw
+    $content = $content -replace "YOUR_OPENAI_API_KEY_HERE", $newKey
+    $content = $content -replace 'api_key: "sk-[^"]*"', "api_key: `"$newKey`""
+    Set-Content $litellmConfig $content
+
+    [System.Windows.MessageBox]::Show(
+        "OpenAI key updated in:`n$litellmConfig",
+        "Update OpenAI Key", "OK", "Information") | Out-Null
+    exit
+}
+
+# Normal service — update key in settings files
+$keyField = $svc.KeyField
+if ([string]::IsNullOrWhiteSpace($keyField)) {
+    [System.Windows.MessageBox]::Show("No key field for service: $svcName", "Update API Key", "OK", "Warning") | Out-Null
+    exit
+}
+
+$newKey = [Microsoft.VisualBasic.Interaction]::InputBox(
+    "Enter your new $svcName API key:",
+    "Update $svcName API Key",
+    "")
+
+if ([string]::IsNullOrWhiteSpace($newKey)) {
+    [System.Windows.MessageBox]::Show("No key entered. Nothing was changed.", "Update API Key", "OK", "Warning") | Out-Null
+    exit
+}
+
+# Update CONFIG.ps1
+$configPath = Join-Path $PSScriptRoot "CONFIG.ps1"
+if (Test-Path $configPath) {
+    $cfgContent = Get-Content $configPath -Raw
+    $cfgContent = $cfgContent -replace "$($svcName)\s*=\s*`"[^`"]*`"", "$($svcName) = `"$newKey`""
+    Set-Content $configPath $cfgContent
+}
+
+$allFiles = @()
+$i = 0
+foreach ($settingsPath in $SettingsFiles) {
+    $templateDir = $TemplateDirs[$i]
+    $allFiles += Join-Path $templateDir "$svcName.settings.json"
+    $allFiles += $settingsPath
+    $i++
+}
 
 $updated = @()
 $skipped = @()
@@ -213,8 +344,8 @@ foreach ($file in $allFiles) {
     if (-not (Test-Path $file)) { $skipped += $file; continue }
     try {
         $content = Get-Content $file -Raw
-        if ($content -match '"ANTHROPIC_AUTH_TOKEN"') {
-            $content = $content -replace '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"[^"]*"', "`"ANTHROPIC_AUTH_TOKEN`": `"$newKey`""
+        if ($content -match "\"$keyField\"") {
+            $content = $content -replace "\"$keyField\"\s*:\s*`"[^`"]*`"", "`"$keyField`": `"$newKey`""
             Set-Content $file $content
             $updated += $file
         } else {
@@ -231,44 +362,50 @@ if ($skipped.Count -gt 0) { $msg += "`n`nSkipped:`n" + ($skipped -join "`n") }
 if ($errors.Count  -gt 0) { $msg += "`n`nErrors:`n" + ($errors  -join "`n") }
 
 [System.Windows.MessageBox]::Show(
-    $msg, "Update Z.ai API Key", "OK",
+    $msg, "Update $svcName API Key", "OK",
     $(if ($errors.Count -gt 0) { "Warning" } else { "Information" })
 ) | Out-Null
-'@ | Set-Content "$switcherDir\update-key.ps1"
-
-Write-Host ""
-Write-Host "Switcher scripts written to: $switcherDir" -ForegroundColor Cyan
+'@
+$keyUpdater | Set-Content "$switcherDir\update-key.ps1"
 
 # ---------------------------------------------------------------------------
-# 5. Desktop .bat launchers
+# 7. Desktop .bat launchers
 # ---------------------------------------------------------------------------
-@"
-@echo off
-powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.claude-switcher\switch-glm.ps1"
-"@ | Set-Content "$desktopPath\Switch to GLM Mode.bat"
+foreach ($svc in $Services) {
+    $svcName = $svc.Name
+    $svcLabel = $svc.Label
+    $batName = "Switch to $svcLabel.bat"
 
-@"
+    @"
 @echo off
-powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.claude-switcher\switch-claude.ps1"
-"@ | Set-Content "$desktopPath\Switch to Claude Mode.bat"
+powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.claude-switcher\switch-$svcName.ps1"
+"@ | Set-Content "$desktopPath\$batName"
+}
 
+# API key updater shortcut
 @"
 @echo off
 powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%USERPROFILE%\.claude-switcher\update-key.ps1"
-"@ | Set-Content "$desktopPath\Update Z.ai API Key.bat"
+"@ | Set-Content "$desktopPath\Update API Key.bat"
 
 Write-Host ""
 Write-Host "Desktop shortcuts created:" -ForegroundColor Cyan
-Write-Host "  Switch to GLM Mode.bat"    -ForegroundColor White
-Write-Host "  Switch to Claude Mode.bat" -ForegroundColor White
-Write-Host "  Update Z.ai API Key.bat"   -ForegroundColor White
+foreach ($svc in $Services) {
+    Write-Host "  Switch to $($svc.Label).bat" -ForegroundColor White
+}
+Write-Host "  Update API Key.bat" -ForegroundColor White
 
 # ---------------------------------------------------------------------------
-# 6. Done
+# 8. Done
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "=== Setup Complete ===" -ForegroundColor Green
 Write-Host ""
-Write-Host "NEXT STEP: Double-click 'Update Z.ai API Key.bat' on your Desktop" -ForegroundColor Yellow
-Write-Host "and paste your Z.ai API key to activate GLM mode." -ForegroundColor Yellow
+Write-Host "NEXT STEP:" -ForegroundColor Yellow
+Write-Host "  1. Double-click 'Update API Key.bat' on your Desktop" -ForegroundColor White
+Write-Host "     to set keys for any service." -ForegroundColor White
+if ($hasLitellmMode) {
+    Write-Host "  2. For OpenAI mode: fill your OpenAI key in $litellmConfigPath" -ForegroundColor White
+    Write-Host "     Then start LiteLLM: litellm --config $litellmConfigPath" -ForegroundColor White
+}
 Write-Host ""

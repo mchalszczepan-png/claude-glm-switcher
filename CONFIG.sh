@@ -46,6 +46,7 @@ SERVICES=(
   "openrouter"
   "requesty"
   "litellm"
+  "openai"
 )
 
 # --- Claude (Anthropic default) ---
@@ -94,6 +95,18 @@ SERVICE_litellm_SONNET="gpt-4o-mini"     # Change to your preferred model
 SERVICE_litellm_HAIKU="gpt-4o-mini"      # Change to your preferred model
 SERVICE_litellm_LABEL="LiteLLM (local proxy)"
 
+# --- OpenAI / ChatGPT (via LiteLLM) ---
+# Dedicated OpenAI mode — uses LiteLLM as a local proxy.
+# The OpenAI API key goes in ~/.litellm/config.yaml, NOT in this file.
+# Use update-openai-key to rotate the OpenAI key.
+# Run LiteLLM first: pip install litellm && litellm --config ~/.litellm/config.yaml
+SERVICE_openai_KEY_FIELD="ANTHROPIC_AUTH_TOKEN"
+SERVICE_openai_BASE_URL="http://localhost:4000"
+SERVICE_openai_OPUS="gpt-4o"
+SERVICE_openai_SONNET="gpt-4o-mini"
+SERVICE_openai_HAIKU="gpt-4o-mini"
+SERVICE_openai_LABEL="OpenAI / ChatGPT"
+
 # -----------------------------------------------------------------------------
 # SECTION 3: API KEYS
 # Fill these in after running setup, or use the update-api-key command.
@@ -104,4 +117,6 @@ API_KEY_glm="YOUR_ZAI_API_KEY_HERE"
 API_KEY_openrouter="YOUR_OPENROUTER_API_KEY_HERE"
 API_KEY_requesty="YOUR_REQUESTY_API_KEY_HERE"
 API_KEY_litellm="YOUR_LITELLM_MASTER_KEY_HERE"
+# API_KEY_openai — NOT here. OpenAI key goes in ~/.litellm/config.yaml
+# Use update-openai-key to set it.
 # API_KEY_myservice="YOUR_KEY_HERE"   # Add keys for custom services here

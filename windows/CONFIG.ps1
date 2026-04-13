@@ -81,6 +81,16 @@ $Services = @(
         Sonnet   = "gpt-4o-mini"
         Haiku    = "gpt-4o-mini"
         IsProxy  = $true
+    },
+    @{
+        Name     = "openai"
+        Label    = "OpenAI / ChatGPT (via LiteLLM)"
+        KeyField = "ANTHROPIC_AUTH_TOKEN"
+        BaseURL  = "http://localhost:4000"
+        Opus     = "gpt-4o"
+        Sonnet   = "gpt-4o-mini"
+        Haiku    = "gpt-4o-mini"
+        IsProxy  = $true
     }
     # To add a custom service, copy and paste a block above and fill in the values
 )
@@ -96,5 +106,7 @@ $ApiKeys = @{
     openrouter = "YOUR_OPENROUTER_API_KEY_HERE"
     requesty   = "YOUR_REQUESTY_API_KEY_HERE"
     litellm    = "YOUR_LITELLM_MASTER_KEY_HERE"
+    # openai — NOT here. OpenAI key goes in ~/.litellm/config.yaml
+    # Use the Update OpenAI Key shortcut to set it.
     # myservice = "YOUR_KEY_HERE"
 }
